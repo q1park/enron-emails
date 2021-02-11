@@ -1,0 +1,8 @@
+data/enron/emails.csv
+data/enron/emails_clean.csv
+__pycache__
+.ipynb_checkpoints
+data/__pycache__
+data/.ipynb_checkpoints
+data/enron/__pycache__
+data/enron/.ipynb_checkpoints
