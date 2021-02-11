@@ -22,6 +22,8 @@ def run():
     state = SessionState.get(data_view=pd.DataFrame(), data_graph=pd.DataFrame(), poi=[])
     
     st.sidebar.header('Keyword Search')
+    
+    st.sidebar.write('Hint: Try searching by Name for ["ljm"](https://en.wikipedia.org/wiki/Enron_scandal#LJM_and_Raptors) and notice the recipient')
 
     by_name = st.sidebar.checkbox("by Name", True)
     by_org = st.sidebar.checkbox("by Org", False)
@@ -50,20 +52,20 @@ def run():
                 state.data_view,
                 data[data.text.str.contains(query)]
             ])
-        
-    st.sidebar.write('Hint: Try searching for ["ljm"](https://en.wikipedia.org/wiki/Enron_scandal#LJM_and_Raptors) and notice the recipient')
+    
     st.sidebar.write('')
     st.sidebar.header('Graph Builder')
     
-    poi_add = st.sidebar.text_area("Add person and org in 'person@org' format", "larry.may@enron")
+    poi_add = st.sidebar.text_area(
+        "Add people and orgs as e.g. first.person@org1, second.person@org2", 
+        "larry.may@enron, jeffrey.gossett@enron, errol.mclaughlin@enron"
+    )
 
-    if st.sidebar.button("Add"):
-        state.poi.append(poi_add)
+    if st.sidebar.button("Add Persons of Interest"):
+        state.poi.extend([x.strip() for x in poi_add.split(',')])
             
     state.poi = st.sidebar.multiselect('Persons of interest', state.poi, default=state.poi)
     state.data_graph = filter_poi(data, state.poi)
-        
-    st.sidebar.write('Hint: larry.may@enron, jeffrey.gossett@enron, errol.mclaughlin@enron')
     
     st.title('Search Results')
     
@@ -72,27 +74,27 @@ def run():
     st.title('View Content')
     
     st.write('Under Construction')
-#     st.subheader('Select Content')
+    st.subheader('Select Content')
     
-#     sender = st.selectbox(
-#         "Sender:", 
-#         list(state.data_graph.sender.unique())
-#     )
+    sender = st.selectbox(
+        "Sender:", 
+        list(state.data_graph.sender.unique())
+    )
     
-#     recipient = st.selectbox(
-#         "Recipient:", 
-#         list(state.data_graph[state.data_graph.sender.isin([sender])].recipient1.unique())
-#     )
-#     st.text("Text:")
-#     st.write("--")
+    recipient = st.selectbox(
+        "Recipient:", 
+        list(state.data_graph[state.data_graph.sender.isin([sender])].recipient1.unique())
+    )
+    st.text("Text:")
+    st.write("Example text from an email")
     
-#     st.subheader('Find Similar')
+    st.subheader('Find Similar Examples')
     
-#     by_bert = st.checkbox("by BERT", True)
-#     by_topic = st.checkbox("by Topic", False)
+    by_bert = st.checkbox("by BERT", True)
+    by_topic = st.checkbox("by Topic", False)
     
-#     if st.button("Find Similar"):
-#         st.write('Not yet implemented')
+    if st.button("Find Similar"):
+        st.write('Not yet implemented')
     
     
     
