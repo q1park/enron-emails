@@ -12,14 +12,51 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 from streamlit_agraph import agraph, Node, Edge, Config
+from datetime import datetime
+
+def filterby_date(df, start_date='1979-01-01', end_date='2005-01-01'):
+    return data[(data.date>=start_date)&(data.date<=end_date)].reset_index(drop=True)
 
 def filter_poi(df, poi):
     return df[(df.sender.isin(poi))|(df.recipient1.isin(poi))|(df.recipient2.isin(poi))|(df.recipient3.isin(poi))]
 
+def search_emails(df, query, by_name=True, by_org=False, by_text=False):
+    results = pd.DataFrame()
+    
+    if by_name:
+        results = pd.concat([
+            results,
+            df[df.sender.apply(lambda x: x.split('@')[0]).str.contains(query)]
+        ])
+
+    if by_org:
+        results = pd.concat([
+            results,
+            df[df.sender.apply(lambda x: x.split('@')[-1]).str.contains(query)]
+        ])
+
+    if by_text:
+        results = pd.concat([
+            results,
+            df[df.text.str.contains(query)]
+        ])
+    return results.sort_values(by='date').drop_duplicates()
+
+def format_text_view_keys(date, subject, recipient):
+    return "{}, {}, {}".format(date, recipient, subject[:15])
+
+def get_text_view(df, sender):
+    text_view = {}
+    
+    for i,row in df[df.sender==sender].iterrows():
+        key = format_text_view_keys(row.date, row.subject, row.recipient1)
+        text_view[key] = row.text
+    return text_view
+
     
 def run():
     data = pd.read_csv('data/enron/emails_small.csv').fillna('')
-    state = SessionState.get(data_view=pd.DataFrame(), data_graph=pd.DataFrame(), poi=[])
+    state = SessionState.get(data_search=pd.DataFrame(), data_graph=pd.DataFrame(), text_view={}, poi=[])
     
     st.sidebar.header('Keyword Search')
     
@@ -32,26 +69,7 @@ def run():
     query = st.sidebar.text_area("Search Field", "ljm")
 
     if st.sidebar.button("Search"):
-        if len(state.data_view)>0:
-            state.data_view = pd.DataFrame()
-            
-        if by_name:
-            state.data_view = pd.concat([
-                state.data_view,
-                data[data.sender.apply(lambda x: x.split('@')[0]).str.contains(query)]
-            ])
-            
-        if by_org:
-            state.data_view = pd.concat([
-                state.data_view,
-                data[data.sender.apply(lambda x: x.split('@')[-1]).str.contains(query)]
-            ])
-                
-        if by_text:
-            state.data_view = pd.concat([
-                state.data_view,
-                data[data.text.str.contains(query)]
-            ])
+        state.data_search = search_emails(df=data, query=query, by_name=by_name, by_org=by_org, by_text=by_text)
     
     st.sidebar.write('')
     st.sidebar.header('Graph Builder')
@@ -67,9 +85,20 @@ def run():
     state.poi = st.sidebar.multiselect('Persons of interest', state.poi, default=state.poi)
     state.data_graph = filter_poi(data, state.poi)
     
+    st.sidebar.header('Time Filter')
+    st.sidebar.write('***Not Yet Implemented***')
+    
+    start_time = st.sidebar.slider(
+        "Select Date Range:",
+        min_value=datetime(1990, 1, 1),
+        max_value=datetime(2005, 1, 1),
+        value=(datetime(1999, 1, 1), datetime(2002, 1, 1)),
+        format="MM/DD/YY"
+    )
+    
     st.title('Search Results')
     
-    st.write(state.data_view)
+    st.write(state.data_search)
 
     st.title('View Content')
     
@@ -81,41 +110,47 @@ def run():
         list(state.data_graph.sender.unique())
     )
     
-    recipient = st.selectbox(
+    state.text_view = get_text_view(state.data_graph, sender)
+    
+    email = st.selectbox(
         "Recipient:", 
-        list(state.data_graph[state.data_graph.sender.isin([sender])].recipient1.unique())
+        list(state.text_view.keys())
     )
-    st.text("Text:")
-    st.write("Example text from an email")
+    
+    if email is not None:
+        st.text("Text:")
+        st.write(state.text_view[email])
     
     st.subheader('Find Similar Examples')
     
+    top_k = st.slider('Number of Examples', 1, 20, 10)
     by_bert = st.checkbox("by BERT", True)
     by_topic = st.checkbox("by Topic", False)
     
     if st.button("Find Similar"):
         st.write('Not yet implemented')
     
-    
-    
     st.title('Graph')
     
     if st.button("Draw Graph"):
-        state.data_graph = filter_poi(data, state.poi)
-        G = nx.from_pandas_edgelist(
-            state.data_graph, 
-            'sender', 
-            'recipient1', 
-            edge_attr=['date', 'subject'], 
-            create_using=nx.DiGraph
-        )
-        nx.set_node_attributes(G, dict(map(lambda x: (x, {'name':x.split('@')[0], 'org': x.split('@')[-1]}), G.nodes)))
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(20,20))
-        plt.figure()
-        pos = nx.spring_layout(G, k=.3)
-        names = nx.get_node_attributes(G, 'name')
-        nx.draw_networkx(G, ax=ax, pos=pos, node_size=150, node_color='red', with_labels=True, edge_color='blue')
-        st.write(fig)
+        if len(state.poi)==0:
+            st.write('Error: Before drawing a graph you must add a person of interest using the Graph Builder in the sidebar')
+        else:
+            state.data_graph = filter_poi(data, state.poi)
+            G = nx.from_pandas_edgelist(
+                state.data_graph, 
+                'sender', 
+                'recipient1', 
+                edge_attr=['date', 'subject'], 
+                create_using=nx.DiGraph
+            )
+            nx.set_node_attributes(G, dict(map(lambda x: (x, {'name':x.split('@')[0], 'org': x.split('@')[-1]}), G.nodes)))
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(20,20))
+            plt.figure()
+            pos = nx.spring_layout(G, k=.3)
+            names = nx.get_node_attributes(G, 'name')
+            nx.draw_networkx(G, ax=ax, pos=pos, node_size=150, node_color='red', with_labels=True, edge_color='blue')
+            st.write(fig)
 
 #     nodes = []
 #     edges = []
