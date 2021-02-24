@@ -1,5 +1,6 @@
 data/enron/emails.csv
 data/enron/emails_clean.csv
+data/enron/_emails*
 __pycache__
 .ipynb_checkpoints
 data/__pycache__

@@ -112,10 +112,10 @@ def main():
         columns = ['date', 'subject', 'sender', 'recipient1', 'recipient2', 'recipient3', 'text']
     )
     
-    data_clean['sender'] = list(Pool().map(name_org, data_clean.sender))
-    data_clean['recipient1'] = list(Pool().map(name_org, data_clean.recipient1))
-    data_clean['recipient2'] = list(Pool().map(name_org, data_clean.recipient2))
-    data_clean['recipient3'] = list(Pool().map(name_org, data_clean.recipient3))
+#     data_clean['sender'] = list(Pool().map(name_org, data_clean.sender))
+#     data_clean['recipient1'] = list(Pool().map(name_org, data_clean.recipient1))
+#     data_clean['recipient2'] = list(Pool().map(name_org, data_clean.recipient2))
+#     data_clean['recipient3'] = list(Pool().map(name_org, data_clean.recipient3))
     
     print('to datetime')
     
