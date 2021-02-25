@@ -158,6 +158,20 @@ class ForensicGraph(PGraph):
     
     def __init__(self, nodes, edges):
         super().__init__(nodes, edges)
+        self.add_invoices('data/invoices/invoices.xlsx')
+        
+    def add_invoices(self, inv_path):
+        inv = load_invoice(inv_path)
+        nodes, edges = invoice_to_nodes(inv)
+        nodes_start = self.nodes.index[-1]+1
+        edges_start = self.edges.index[-1]+1
+        nodes.index+=nodes_start
+        edges.index+=edges_start
+        
+        edges.sender+=nodes_start
+        edges.receiver1+=nodes_start
+        self.nodes = pd.concat([self.nodes, nodes])
+        self.edges = pd.concat([self.edges, edges])
         
     def make_subgraph(self, f1, f2=None, start_date=datetime(2001, 1, 1), end_date=datetime(2002, 1, 1)):
         edges = filterby_date(self.edges, start_date=start_date, end_date=end_date)
@@ -353,6 +367,98 @@ class DictInv(dict):
             raise KeyError(key)
         return val
     
+    
+    
+    
+    
+    
+convert_names = {
+    'John T Lau': 'Kenneth Lay', 
+    'John Lau': 'Kenneth Lay',
+    'Betty S Lau': 'Jeff Skilling',
+    'Betty Lau': 'Jeff Skilling',
+    'Wanda': 'Kenneth Lay',
+    'Wanda Wong': 'Kenneth Lay',
+    'WANDA WONG': 'Kenneth Lay',
+    'Cindy':'Rosalee Fleming',
+    'Peter Lyons':'Rosalee Fleming'
+}
+
+convert_orgs = {
+    'Ark Technology Solutions LLC':'mindspring',
+    'ADP. LLC':'cadvision',
+    'ADP':'cadvision',
+    'FedEx Express':'reliantenergy',
+    'FedEx Ground':'reliant',
+    'ARGUS LEGAL PLLC':'kudlow',
+    'Audi\nFinancial Services':'mediaone',
+    'Bradley Baron, LLC':'weforum',
+    'ADT SECURITY SERVICES':'mediaone',
+    'ADT Security Services':'mindspring',
+    '3	AES ADVANCED ELECTRONIC Solutions, INC':'mediaone',
+    'ADVANCED ELECTRONIC\n- SOLUTIONS, INC':'mindspring',
+    'Absolute Protective Systems Inc.':'weforum',
+    'Absolute Protective Systems, Inc.':'weforum',
+}
+
+def load_invoice(inv_path):
+    inv = pd.read_excel(inv_path).fillna('').drop(columns=['filename', 'name'])
+    inv = inv[(inv['date']!='')&(inv['amount']!='')]
+    inv.date = pd.to_datetime(inv.date.apply(lambda x: x.replace(',2',', 2')))
+    inv = inv.sort_values(by='date')
+    
+    inv['vendor_name'] = inv['vendor_name'].replace(convert_orgs, regex=True)
+    inv['recipient'] = inv['recipient'].replace(convert_names, regex=True)
+    inv['date'] = inv['date']-pd.Timedelta(days=19*365) 
+    inv['date'][:10] = inv['date'][:10]+pd.Timedelta(days=365) 
+    return inv
+
+def invoice_to_nodes(inv):
+    nodes_dict = {k:[] for k in ['name1', 'name2', 'email1', 'email2', 'org1', 'org2']}
+    edges_dict = {k:[] for k in ['sender', 'receiver1', 'receiver2', 'receiver3', 'type', 'datetime', 'desc', 'data']}
+    
+    count_node = 0
+    for i,row in inv.iterrows():
+
+        sender = row['recipient'].lower()
+        recipient = re.sub('inc|llc', '', row['vendor_name'].strip('.').lower()).strip(' ,')
+        datetime = row['date']
+        desc = row['description']
+        data = re.sub('\$|\,', '', row['amount'])
+        
+        edges_dict['sender'].append(count_node)
+        edges_dict['receiver1'].append(count_node+1)
+        edges_dict['receiver2'].append('')
+        edges_dict['receiver3'].append('')
+        edges_dict['type'].append('invoice')
+        edges_dict['datetime'].append(datetime)
+        edges_dict['desc'].append(desc)
+        edges_dict['data'].append(data)
+        
+        nodes_dict['name1'].append(sender)
+        nodes_dict['name2'].append('')
+        nodes_dict['email1'].append('')
+        nodes_dict['email2'].append('')
+        nodes_dict['org1'].append('enron')
+        nodes_dict['org2'].append('')
+        count_node+=1
+        
+        
+        nodes_dict['name1'].append(recipient)
+        nodes_dict['name2'].append('')
+        nodes_dict['email1'].append('')
+        nodes_dict['email2'].append('')
+        nodes_dict['org1'].append(recipient)
+        nodes_dict['org2'].append('')
+        count_node+=1
+        
+        
+    return pd.DataFrame(nodes_dict), pd.DataFrame(edges_dict)
+
+
+
+    
+import seaborn as sns
 from src.graph_utils import make_circos, get_centrality, get_betweenness
     
 def run():
@@ -467,7 +573,9 @@ def run():
     
     with st.beta_expander('Filter by Org'):
         _org = get_orgs(_assoc, state.graph.nodes)
-        org = st.multiselect('Linked organizations', sorted(_org), default=_org[:5])
+        org = st.multiselect('Linked organizations', sorted(_org), default=[x for x in ['enron', 'mindspring', 'mediaone', 'as-coa',
+                                                                            'harvard', 'rice', 'weforum', 'bellsouth', 
+                                                                            'gte', 'i2', 'prodigy'] if x in _org])
         
     with st.beta_expander('Filter by Assoc'):
         _assoc = filter_nodes_by_org(_assoc, state.graph.nodes, org)
@@ -502,28 +610,29 @@ def run():
                     G, ax=ax, pos=pos, nodelist=node_names, node_color=color, label={x:G.nodes[x]['label'] for x in G.nodes})
 
             labels={x:G.nodes[x]['label'] for x in G.nodes}
-            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=list(G.edges), edge_color='black', connectionstyle='arc3, rad = 0.1')
+            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=[x for x in G.edges if G.edges[x]['type']=='email'], edge_color='blue', connectionstyle='arc3, rad = 0.1')
+            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=[x for x in G.edges if G.edges[x]['type']=='invoice'], edge_color='blue', connectionstyle='arc3, rad = 0.1')
             nx.draw_networkx_labels(G, ax=ax, pos=pos, labels=labels)
             
 
             st.write(fig)
     
-            fig, axs = plt.subplots(2, 1, figsize=(15, 8))
+#             fig, axs = plt.subplots(2, 1, figsize=(15, 8))
 
-            cent = get_centrality(G)
-            centplot = sns.barplot(ax=axs[0], y='centrality', x='name', data=cent.replace({r'\.com$':r''}, regex=True)[:10])
-            axs[0].set_xlabel('Degree Centrality')
-            axs[0].set_ylabel('')
-            axs[0].set_title('Top Degree in Enron Network')
-            plt.setp(centplot.get_xticklabels(), rotation=30)
+#             cent = get_centrality(G)
+#             centplot = sns.barplot(ax=axs[0], y='centrality', x='name', data=cent[:10])
+#             axs[0].set_xlabel('Degree Centrality')
+#             axs[0].set_ylabel('')
+#             axs[0].set_title('Top Degree in Enron Network')
+#             plt.setp(centplot.get_xticklabels(), rotation=30)
 
-            bet = get_betweenness(G)
-            betplot = sns.barplot(ax=axs[1], y='betweenness', x='name', data=bet.replace({r'\.com$':r''}, regex=True)[:10])
-            axs[1].set_xlabel('Degree Betweenness Centrality')
-            axs[1].set_ylabel('')
-            axs[1].set_title('Top Betweenness in Enron Network')
-            plt.setp(betplot.get_xticklabels(), rotation=45)
-            st.write(fig)
+#             bet = get_betweenness(G)
+#             betplot = sns.barplot(ax=axs[1], y='betweenness', x='name', data=bet[:10])
+#             axs[1].set_xlabel('Degree Betweenness Centrality')
+#             axs[1].set_ylabel('')
+#             axs[1].set_title('Top Betweenness in Enron Network')
+#             plt.setp(betplot.get_xticklabels(), rotation=45)
+#             st.write(fig)
 
 
 
