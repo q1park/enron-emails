@@ -58,12 +58,10 @@ def search_emails(df, query, by_name=True, by_org=False, by_text=False):
         ])
     return results.sort_values(by='date').drop_duplicates()
 
-
-
 from collections import Counter
 
 class PGraph:
-    def __init__(self, nodes, edges):
+    def __init__(self, nodes=None, edges=None):
         self.nodes = nodes
         self.edges = edges
         
@@ -95,11 +93,6 @@ class PGraph:
     
     def edge_counts(self, idxs, cols):
         return Counter(self.edge_values(idxs, cols))
-
-    
-
-
-
 
 from datetime import datetime
 from src.spellcheck import find_close
@@ -201,9 +194,9 @@ class ForensicGraph(PGraph):
 
     def merge(self, *idxs):
         if len(idxs)>1:
-            idxs = sorted(idxs)
+            idxs = list(sorted(idxs))
             prime, aliases = idxs[0], idxs[1:]
-            
+            merged_row = self._merged_row(*idxs)
             self.nodes.loc[prime].update(self._merged_row(*idxs))
             self.nodes = self.nodes.drop(index=aliases)
 
@@ -217,24 +210,24 @@ class ForensicGraph(PGraph):
         pieces = [x.strip() for x in name.split() if len(x.strip())>0]
         if len(pieces)>=2:
             alt_1 = '.'.join([pieces[0][0], pieces[-1]])
-            alt_2 = '.'.join([pieces[0], pieces[-1][0]])
             idxs.update(find_close(alt_1, self.nodes))
-            idxs.update(find_close(alt_2, self.nodes))
+#             alt_2 = '.'.join([pieces[0], pieces[-1][0]])
+#             idxs.update(find_close(alt_2, self.nodes))
         return list(sorted(idxs))
     
     def search_names(self, names):
         names = [x.strip() for x in names.split(',')]
         return [self.search_name(x) for x in names]
-
-
-
-# def node_summaries(idxs, nodes):
-#     def summarize(row):
-#         return row['name1'], row['email1'].split('@')[0], row['org1']
-#     return {summarize(nodes.loc[idx]):idx for idx in idxs}
+    
 def node_summaries(idxs, nodes):
     def summarize(row):
-        return row['name1'], row['email1'].split('@')[0], row['org1']
+#         if len(row['name1'])>0:
+#             name=row['name1']
+#         elif len(row['email1'])>0:
+#             name=row['email1'].split('@')[0]
+        name=row['name1']
+        tag=row['email1'].split('@')[0]
+        return name, row['org1'], tag
     return {summarize(nodes.loc[idx]):idx for idx in idxs}
     
 def edge_summaries(idxs, nodes, edges):
@@ -246,56 +239,139 @@ def edge_summaries(idxs, nodes, edges):
         return sender, receiver, row['datetime'].date(), row['desc'][:10]
     return {summarize(edges.loc[idx]):idx for idx in idxs}
 
+def get_orgs(idxs, nodes):
+    return [x[0] for x in Counter(nodes.loc[idxs]['org1']).most_common() if len(x[0])>0]
+
+def filter_nodes_by_org(idxs, nodes, org):
+    filtered_nodes = nodes.loc[idxs]
+    return filtered_nodes[filtered_nodes['org1'].isin(org)].index
+
+def filter_nodes_by_date(idxs, edges, start_date, end_date):
+    edges = filterby_date(edges, start_date=start_date, end_date=end_date)
+    all_nodes = [int(x) for x in edges[edge_bounds].values.reshape(-1) if x!='']
+    return [x for x in idxs if x in all_nodes]
+
+class DictInv(dict):
+    def __init__(self, *args, **kwargs):
+        self.update(*args, **kwargs)
+        self.inv = dict()
+
+    def __getitem__(self, key):
+        val = dict.__getitem__(self, key)
+        return val
+
+    def __setitem__(self, key, val):
+        dict.__setitem__(self, key, val)
+        self.inv.__setitem__(val, key)
+        
+    def __delitem__(self, key):
+        if key in self:
+            val = self[key]
+            self.inv.__delitem__(val)
+            return dict.__delitem__(self, key)
+        elif key in self.inv:
+            val = self.inv[key]
+            dict.__delitem__(self, val)
+            return self.inv.__delitem__(key)
+
+    def __repr__(self):
+        dictrepr = dict.__repr__(self)
+        return '%s(%s)' % (type(self).__name__, dictrepr)
+        
+    def update(self, *args, **kwargs):
+        for k, v in dict(*args, **kwargs).items():
+            self[k] = v
+            
+    def pop(self, key):
+        if key in self:
+            val = self[key]
+            self.__delitem__(key)
+        elif key in self.inv:
+            val = self.inv[key]
+            self.__delitem__(val)
+        else:
+            raise KeyError(key)
+        return val
     
 def run():
     data = filterby_date_old(pd.read_csv('data/enron/emails_filtered.csv').fillna(''))
     data['date'] = pd.to_datetime(data['date'])
     
     state = SessionState.get(
-        graph = ForensicGraph.from_emails('data/enron/emails_filtered.csv'),
-        data_graph=pd.DataFrame(), 
-        text_view={}, 
-        poi=[], assoc=[], org=[], merge_cands=[], merge_keys=[]
+        graph=ForensicGraph.from_emails('data/enron/emails_filtered.csv'),
+        subgraph=PGraph(), 
+        node_dict=DictInv(), edge_dict=DictInv(), merge_dict=DictInv(),
+        poi=[], assoc=[], org=[], merge_cands=[]
     )
+    
+    ###############################################
+    ### Sidebar
+    ###############################################
     
     st.sidebar.header('Persons of Interest')
     
-    poi_add = st.sidebar.text_area(
-        "Add people and orgs as e.g. first.person@org1, second.person@org2", 
+    poi_find = st.sidebar.text_area(
+        "Add person names separated by commas", 
         "kenneth lay, jeff skilling"
     )
-
+    
+    
     if st.sidebar.button("Find Persons of Interest"):
-        state.merge_cands = [
+        merge_cands = [
             dict(sorted(node_summaries(x, state.graph.nodes).items(), key=lambda x: x[1])) 
-            for x in state.graph.search_names(poi_add)
+            for x in state.graph.search_names(poi_find)
         ]
+        
+        state.merge_cands = [list(x.values()) for x in merge_cands]
+        state.merge_dict.update({k:v for cand in merge_cands for k,v in cand.items()})
+        
+    ###############################################
         
     for i, x in enumerate(state.merge_cands):
         if len(x)>=2:
-            state.merge_keys = st.sidebar.multiselect(
+            merge_keys = st.sidebar.multiselect(
                 'Merge suggestion {}'.format(i),
-                list(state.merge_cands[i].keys()), 
-                default=list(state.merge_cands[i].keys()))
+                list(map(state.merge_dict.inv.get, x)), 
+                default=list(map(state.merge_dict.inv.get, x))
+            )
 
-            if st.sidebar.button("Merge {}".format(i)):
-                state.graph.merge(state.merge_keys)
-                state.merge_cands[i] = {state.merge_keys[0]:state.merge_cands[i][state.merge_keys[0]]}
+            if st.sidebar.button("Merge {}".format(i+1)):
+                idxs = sorted(list(map(state.merge_dict.get, merge_keys)))
+                state.graph.merge(*idxs)
+                state.merge_cands[i] = idxs[0:1]
+                state.merge_dict.update(node_summaries(idxs[0:1], state.graph.nodes))
                 SessionState.rerun()
-
-    add_poi = st.sidebar.multiselect(
-        'Persons List', 
-        [k for cand in state.merge_cands for k,v in cand.items()], 
-        default=[k for cand in state.merge_cands for k,v in cand.items()]
-    )
-
-    if st.sidebar.button("Add Persons of Interest"):
-        state.poi.extend(add_poi)
-        SessionState.rerun()
     
+    _poi_add = list(map(state.merge_dict.inv.get, [x for cand in state.merge_cands for x in cand]))
+    poi_add = st.sidebar.multiselect('Persons List', _poi_add, default=_poi_add)
+    
+    if st.sidebar.button("Add Persons of Interest"):
+        poi_dict = {x:state.merge_dict[x] for x in poi_add}
+        
+        assoc_dict = node_summaries(
+            state.graph.nodes_from_edges(
+                *state.graph.edges_from_nodes(
+                    *list(poi_dict.values())).index
+            ).drop(index=list(poi_dict.values())).index.tolist(), 
+            state.graph.nodes
+        )
+
+        state.node_dict.update(poi_dict)
+        state.node_dict.update(assoc_dict)
+#         state.edge_dict.update({add_poi[x]:x for x in poi_add})
+
+        state.poi.extend(list(poi_dict.values()))
+        state.assoc.extend(list(assoc_dict.values()))
+        state.merge_dict = DictInv()
+        state.merge_cands = []
+        SessionState.rerun()
+
+    ###############################################
+    ### Main Page
+    ###############################################
     
     with st.beta_expander('Search'):
-        st.write('Note: Currently key-word search only... to be superseded by SinguSearch')
+        st.write('Note: Currently key-word search only... to be superseded by "SinguSearch"')
         by_name = st.checkbox("by Name", True)
         by_org = st.checkbox("by Org", False)
         by_text = st.checkbox("by Text", False)
@@ -306,9 +382,16 @@ def run():
             st.subheader('Search Results')
             st.write(search_emails(df=data, query=query, by_name=by_name, by_org=by_org, by_text=by_text))
     
+    ###############################################
     
     st.header('Persons of Interest')
-    state.poi = st.multiselect('Persons of interest', state.poi, default=state.poi)
+    
+    poi = st.multiselect(
+        'Persons of interest', 
+        list(state.node_dict.inv[x] for x in state.poi), 
+        default=list(state.node_dict.inv[x] for x in state.poi)
+    )
+    state.poi = [state.node_dict[x] for x in poi]
     
     start_date, end_date = st.slider(
         "Select Date Range:",
@@ -318,67 +401,85 @@ def run():
         format="MM/DD/YY"
     )
     
-    state.data_graph = filterby_date_old(filter_poi(data, state.poi), start_date=start_date, end_date=end_date)
+    _assoc = filter_nodes_by_date(state.assoc, state.graph.edges, start_date=start_date, end_date=end_date)
     
-    state.org = st.multiselect('Linked organizations', list(range(100)), default=list(range(100))[:20])
-    state.assoc = st.multiselect('Linked persons', list(range(100)), default=list(range(100))[:20])
+    with st.beta_expander('Filter by Org'):
+        _org = get_orgs(_assoc, state.graph.nodes)
+        org = st.multiselect('Linked organizations', sorted(_org), default=_org[:5])
+        
+    with st.beta_expander('Filter by Assoc'):
+        _assoc = filter_nodes_by_org(_assoc, state.graph.nodes, org)
+
+        assoc = st.multiselect(
+            'Linked persons', 
+            list(state.node_dict.inv[x] for x in _assoc), 
+            default=list(state.node_dict.inv[x] for x in _assoc)[:300]
+        )
     
-    st.write('Found {} records'.format(len(state.data_graph)))
+    state.subgraph = state.graph.make_subgraph(
+        f1=state.poi, 
+        f2=[state.node_dict[x] for x in assoc],
+        start_date=start_date, end_date=end_date
+    )
+    
+    st.write('Found {} records'.format(len(assoc)))
     
     with st.beta_expander('Show Graph'):
         if len(state.poi)==0:
-            st.write('Error: Before drawing a graph you must add a person of interest using the Graph Builder in the sidebar')
+            st.write('Before drawing a graph you must add a person of interest using the sidebar')
         else:
             G = nx.from_pandas_edgelist(
-                state.data_graph, 
+                state.subgraph.edges, 
                 'sender', 
-                'recipient1', 
-                edge_attr=['date', 'subject'], 
-                create_using=nx.DiGraph
+                'receiver1', 
+                edge_attr=['datetime', 'desc'], 
+                create_using=nx.MultiDiGraph
             )
-            nx.set_node_attributes(G, dict(map(lambda x: (x, {'name':x.split('@')[0], 'org': x.split('@')[-1]}), G.nodes)))
+#             nx.set_node_attributes(G, dict(map(lambda x: (x, {'name':x.split('@')[0], 'org': x.split('@')[-1]}), G.nodes)))
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(20,10))
             plt.figure()
             pos = nx.spring_layout(G, k=.3)
-            names = nx.get_node_attributes(G, 'name')
+#             names = nx.get_node_attributes(G, 'name')
             nx.draw_networkx(G, ax=ax, pos=pos, node_size=150, node_color='red', with_labels=True, edge_color='blue')
             st.write(fig)
+            st.write(G.edges)
+            st.write(state.subgraph.edges)
             
-    st.header('Inspect Evidence')
+#     st.header('Inspect Evidence')
 
-    sender = st.selectbox(
-        "Sender:", 
-        list(state.data_graph.sender.unique())
-    )
+#     sender = st.selectbox(
+#         "Sender:", 
+#         list(state.subgraph.sender.unique())
+#     )
 
-    state.text_view = get_text_view(state.data_graph, sender)
+#     state.text_view = get_text_view(state.subgraph, sender)
 
-    email = st.selectbox(
-        "Receiver:", 
-        list(state.text_view.keys())
-    )
+#     email = st.selectbox(
+#         "Receiver:", 
+#         list(state.text_view.keys())
+#     )
     
-    col1, col2 = st.beta_columns(2)
+#     col1, col2 = st.beta_columns(2)
     
     
-    payment = col1.selectbox(
-        "Payments", 
-        [1,2,3,4]
-    )
-    col1.text("Test payment")
+#     payment = col1.selectbox(
+#         "Payments", 
+#         [1,2,3,4]
+#     )
+#     col1.text("Test payment")
 
-    if email is not None:
-        col2.text("Text:")
-        col2.write(state.text_view[email])
+#     if email is not None:
+#         col2.text("Text:")
+#         col2.write(state.text_view[email])
 
-    with st.beta_expander('Find Similar Examples'):
+#     with st.beta_expander('Find Similar Examples'):
 
-        top_k = st.slider('Number of Examples', 1, 20, 10)
-        by_bert = st.checkbox("by BERT", True)
-        by_topic = st.checkbox("by Topic", False)
+#         top_k = st.slider('Number of Examples', 1, 20, 10)
+#         by_bert = st.checkbox("by BERT", True)
+#         by_topic = st.checkbox("by Topic", False)
 
-        if st.button("Find Similar"):
-            st.write('Not yet implemented')
+#         if st.button("Find Similar"):
+#             st.write('Not yet implemented')
 
             
     
