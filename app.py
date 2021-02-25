@@ -458,7 +458,7 @@ def invoice_to_nodes(inv):
 
 
     
-import seaborn as sns
+# import seaborn as sns
 from src.graph_utils import make_circos, get_centrality, get_betweenness
     
 def run():
