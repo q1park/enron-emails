@@ -145,7 +145,7 @@ def emails2edges(df, nodes):
     return edges
 
 def filterby_date(df, start_date=datetime(1979, 1, 1), end_date=datetime(2005, 1, 1)):
-    return df[(df.datetime>=start_date)&(df.datetime<=end_date)].reset_index(drop=True)
+    return df[(df.datetime>=start_date)&(df.datetime<=end_date)]
 
 class ForensicGraph(PGraph):
     @classmethod
@@ -251,6 +251,66 @@ def filter_nodes_by_date(idxs, edges, start_date, end_date):
     all_nodes = [int(x) for x in edges[edge_bounds].values.reshape(-1) if x!='']
     return [x for x in idxs if x in all_nodes]
 
+def graph_to_networkx(graph):
+    G = nx.MultiDiGraph()
+    
+    for i, row in graph.nodes.iterrows():
+        G.add_nodes_from([(i, {
+            'label':row['name1'] if len(row['name1'])>0 else row['email1'].split('@')[0],
+            'org':row['org1']
+        })])
+        
+    for i, row in graph.edges.iterrows():
+        if row['sender']=='' or row['receiver1']=='':
+            continue
+            
+        G.add_edges_from([(int(row['sender']),int(row['receiver1']),{
+            'type':row['type'],
+            'date':row['datetime'].date,
+            'desc':row['desc'],
+            'data':row['data']
+        })])
+    return G
+
+import random
+import matplotlib.colors as mcolors
+
+def grouped_layout(G, rad = 3.5):
+    random.seed(7)
+    colors = list(mcolors.CSS4_COLORS.keys())
+    random.shuffle(colors)
+
+    node_network_map = nx.get_node_attributes(G, 'org')
+    networks = sorted(list(set(node_network_map.values())))
+    color_map = dict(zip(networks, colors[:len(networks)]))
+    nodes_by_color = {
+        val: [node for node in G if node in node_network_map and color_map[node_network_map[node]] == val]
+        for val in colors
+    }
+    
+    pos = nx.circular_layout(G)   # replaces your original pos=...
+    # prep center points (along circle perimeter) for the clusters
+    angs = np.linspace(0, 2*np.pi, 1+len(networks))
+    repos = []
+    
+    for ea in angs:
+        if ea > 0:
+            #print(rad*np.cos(ea), rad*np.sin(ea))  # location of each cluster
+            repos.append(np.array([rad*np.cos(ea), rad*np.sin(ea)]))
+
+    color_pos = dict(zip(nodes_by_color.keys(), range(len(nodes_by_color))))
+
+    for ea in pos.keys():
+        posx = 0
+
+        for c, p in color_pos.items():
+            if ea in nodes_by_color[c]:
+                posx = p
+
+        #print(ea, pos[ea], pos[ea]+repos[posx], color, posx)
+        pos[ea] += repos[posx]
+    return pos, nodes_by_color
+
 class DictInv(dict):
     def __init__(self, *args, **kwargs):
         self.update(*args, **kwargs)
@@ -293,10 +353,9 @@ class DictInv(dict):
             raise KeyError(key)
         return val
     
-def run():
-    data = filterby_date_old(pd.read_csv('data/enron/emails_filtered.csv').fillna(''))
-    data['date'] = pd.to_datetime(data['date'])
+from src.graph_utils import make_circos, get_centrality, get_betweenness
     
+def run():
     state = SessionState.get(
         graph=ForensicGraph.from_emails('data/enron/emails_filtered.csv'),
         subgraph=PGraph(), 
@@ -372,6 +431,9 @@ def run():
     
     with st.beta_expander('Search'):
         st.write('Note: Currently key-word search only... to be superseded by "SinguSearch"')
+        data = filterby_date_old(pd.read_csv('data/enron/emails_filtered.csv').fillna(''))
+        data['date'] = pd.to_datetime(data['date'])
+        
         by_name = st.checkbox("by Name", True)
         by_org = st.checkbox("by Org", False)
         by_text = st.checkbox("by Text", False)
@@ -428,22 +490,43 @@ def run():
         if len(state.poi)==0:
             st.write('Before drawing a graph you must add a person of interest using the sidebar')
         else:
-            G = nx.from_pandas_edgelist(
-                state.subgraph.edges, 
-                'sender', 
-                'receiver1', 
-                edge_attr=['datetime', 'desc'], 
-                create_using=nx.MultiDiGraph
-            )
-#             nx.set_node_attributes(G, dict(map(lambda x: (x, {'name':x.split('@')[0], 'org': x.split('@')[-1]}), G.nodes)))
+            G = graph_to_networkx(state.subgraph)
+            
+            pos, nodes_by_color = grouped_layout(G, rad=3.5)
+            
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(20,10))
             plt.figure()
-            pos = nx.spring_layout(G, k=.3)
-#             names = nx.get_node_attributes(G, 'name')
-            nx.draw_networkx(G, ax=ax, pos=pos, node_size=150, node_color='red', with_labels=True, edge_color='blue')
+
+            for color, node_names in nodes_by_color.items():
+                nx.draw_networkx_nodes(
+                    G, ax=ax, pos=pos, nodelist=node_names, node_color=color, label={x:G.nodes[x]['label'] for x in G.nodes})
+
+            labels={x:G.nodes[x]['label'] for x in G.nodes}
+            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=list(G.edges), edge_color='black', connectionstyle='arc3, rad = 0.1')
+            nx.draw_networkx_labels(G, ax=ax, pos=pos, labels=labels)
+            
+
             st.write(fig)
-            st.write(G.edges)
-            st.write(state.subgraph.edges)
+    
+            fig, axs = plt.subplots(2, 1, figsize=(15, 8))
+
+            cent = get_centrality(G)
+            centplot = sns.barplot(ax=axs[0], y='centrality', x='name', data=cent.replace({r'\.com$':r''}, regex=True)[:10])
+            axs[0].set_xlabel('Degree Centrality')
+            axs[0].set_ylabel('')
+            axs[0].set_title('Top Degree in Enron Network')
+            plt.setp(centplot.get_xticklabels(), rotation=30)
+
+            bet = get_betweenness(G)
+            betplot = sns.barplot(ax=axs[1], y='betweenness', x='name', data=bet.replace({r'\.com$':r''}, regex=True)[:10])
+            axs[1].set_xlabel('Degree Betweenness Centrality')
+            axs[1].set_ylabel('')
+            axs[1].set_title('Top Betweenness in Enron Network')
+            plt.setp(betplot.get_xticklabels(), rotation=45)
+            st.write(fig)
+
+
+
             
 #     st.header('Inspect Evidence')
 
