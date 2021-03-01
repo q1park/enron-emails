@@ -14,19 +14,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 from datetime import datetime
-def filterby_date_old(df, start_date='1979-01-01', end_date='2005-01-01'):
-    return df[(df.date>=start_date)&(df.date<=end_date)].reset_index(drop=True)
-
-def filter_poi(df, poi):
-    return df[
-        (df.sender.isin(poi))|
-        (df.recipient1.isin(poi))|
-        (df.recipient2.isin(poi))|
-        (df.recipient3.isin(poi))
-    ]
-
-def format_text_view_keys(date, subject, recipient):
-    return "{}, {}, {}".format(date, recipient, subject[:15])
 
 def get_text_view(df, sender):
     text_view = {}
@@ -97,6 +84,10 @@ class PGraph:
 from datetime import datetime
 from src.spellcheck import find_close
 
+
+def filterby_date(df, start_date=datetime(1979, 1, 1), end_date=datetime(2005, 1, 1)):
+    return df[(df.datetime>=start_date)&(df.datetime<=end_date)]
+
 node_attrs = ['name1', 'name2', 'email1', 'email2', 'org1', 'org2']
 edge_bounds = ['sender', 'receiver1', 'receiver2', 'receiver3']
 
@@ -144,8 +135,51 @@ def emails2edges(df, nodes):
     
     return edges
 
-def filterby_date(df, start_date=datetime(1979, 1, 1), end_date=datetime(2005, 1, 1)):
-    return df[(df.datetime>=start_date)&(df.datetime<=end_date)]
+def invoices2nodes(df):
+    nodes_dict = {k:[] for k in ['name1', 'name2', 'email1', 'email2', 'org1', 'org2']}
+    
+    for i,row in df.iterrows():
+        sender = row['recipient'].lower()
+        recipient = row['vendor_name']
+        datetime = row['date']
+        desc = row['description']
+        data = row['amount']
+
+        nodes_dict['name1'].append(sender)
+        nodes_dict['name2'].append('')
+        nodes_dict['email1'].append('')
+        nodes_dict['email2'].append('')
+        nodes_dict['org1'].append('enron')
+        nodes_dict['org2'].append('')
+        
+        nodes_dict['name1'].append('')
+        nodes_dict['name2'].append(recipient)
+        nodes_dict['email1'].append('')
+        nodes_dict['email2'].append('')
+        nodes_dict['org1'].append(recipient)
+        nodes_dict['org2'].append('')
+        
+    return pd.DataFrame(nodes_dict).drop_duplicates().reset_index(drop=True)
+
+def invoices2edges(df, nodes):
+    receiver2idx = {v:k for k,v in nodes.to_dict()['org1'].items() if v!=''}
+    sender2idx = {v:k for k,v in nodes.to_dict()['name1'].items() if v!=''}
+    
+    df = df[df['recipient']!='']
+    
+    edges = pd.DataFrame({
+        'sender':list(map(sender2idx.get, df['recipient'])),
+        'receiver1':list(map(receiver2idx.get, df['vendor_name'])),
+        'receiver2':['']*len(df),
+        'receiver3':['']*len(df),
+        'type':['invoice']*len(df),
+        'datetime':df['date'].tolist(),
+        'desc':df['description'].tolist(),
+        'data':df['amount'].tolist()
+    }).fillna('')
+    
+    return edges
+
 
 class ForensicGraph(PGraph):
     @classmethod
@@ -158,18 +192,23 @@ class ForensicGraph(PGraph):
     
     def __init__(self, nodes, edges):
         super().__init__(nodes, edges)
-        self.add_invoices('data/invoices/invoices.xlsx')
+        self.add_invoices()
         
-    def add_invoices(self, inv_path):
-        inv = load_invoice(inv_path)
-        nodes, edges = invoice_to_nodes(inv)
-        nodes_start = self.nodes.index[-1]+1
-        edges_start = self.edges.index[-1]+1
+    def add_invoices(self, inv_path='data/invoices/invoices_clean.csv'):
+        nodes_start, edges_start = self.nodes.index[-1]+1, self.edges.index[-1]+1
+        
+        invoices = pd.read_csv(inv_path).fillna('')
+        invoices.date = pd.to_datetime(invoices.date)
+        
+        nodes = invoices2nodes(invoices)
+        edges = invoices2edges(invoices, nodes)
+
         nodes.index+=nodes_start
         edges.index+=edges_start
         
-        edges.sender+=nodes_start
-        edges.receiver1+=nodes_start
+        edges['sender']+=nodes_start
+        edges['receiver1']+=nodes_start
+        
         self.nodes = pd.concat([self.nodes, nodes])
         self.edges = pd.concat([self.edges, edges])
         
@@ -225,8 +264,10 @@ class ForensicGraph(PGraph):
         if len(pieces)>=2:
             alt_1 = '.'.join([pieces[0][0], pieces[-1]])
             idxs.update(find_close(alt_1, self.nodes))
-#             alt_2 = '.'.join([pieces[0], pieces[-1][0]])
-#             idxs.update(find_close(alt_2, self.nodes))
+            
+            if len(pieces)==2:
+                alt_2 = '  '.join([pieces[0], pieces[1]])
+                idxs.update(find_close(alt_2, self.nodes))
         return list(sorted(idxs))
     
     def search_names(self, names):
@@ -235,14 +276,10 @@ class ForensicGraph(PGraph):
     
 def node_summaries(idxs, nodes):
     def summarize(row):
-#         if len(row['name1'])>0:
-#             name=row['name1']
-#         elif len(row['email1'])>0:
-#             name=row['email1'].split('@')[0]
         name=row['name1']
         tag=row['email1'].split('@')[0]
         return name, row['org1'], tag
-    return {summarize(nodes.loc[idx]):idx for idx in idxs}
+    return {idx:summarize(nodes.loc[idx]) for idx in idxs}
     
 def edge_summaries(idxs, nodes, edges):
     def summarize(row):
@@ -251,7 +288,7 @@ def edge_summaries(idxs, nodes, edges):
         sender = sender_row['name1'] if sender_row['name1'] is not '' else sender_row['email1'].split('@')[0]
         receiver = receiver_row['name1'] if receiver_row['name1'] is not '' else receiver_row['email1'].split('@')[0]
         return sender, receiver, row['datetime'].date(), row['desc'][:10]
-    return {summarize(edges.loc[idx]):idx for idx in idxs}
+    return {idx:summarize(edges.loc[idx]) for idx in idxs}
 
 def get_orgs(idxs, nodes):
     return [x[0] for x in Counter(nodes.loc[idxs]['org1']).most_common() if len(x[0])>0]
@@ -297,6 +334,10 @@ def grouped_layout(G, rad = 3.5):
     node_network_map = nx.get_node_attributes(G, 'org')
     networks = sorted(list(set(node_network_map.values())))
     color_map = dict(zip(networks, colors[:len(networks)]))
+    
+    enron_nodes = [k for k,v in node_network_map.items() if v=='enron']
+    print(node_network_map)
+    
     nodes_by_color = {
         val: [node for node in G if node in node_network_map and color_map[node_network_map[node]] == val]
         for val in colors
@@ -309,7 +350,7 @@ def grouped_layout(G, rad = 3.5):
     
     for ea in angs:
         if ea > 0:
-            #print(rad*np.cos(ea), rad*np.sin(ea))  # location of each cluster
+#             print(rad*np.cos(ea), rad*np.sin(ea))  # location of each cluster
             repos.append(np.array([rad*np.cos(ea), rad*np.sin(ea)]))
 
     color_pos = dict(zip(nodes_by_color.keys(), range(len(nodes_by_color))))
@@ -320,11 +361,12 @@ def grouped_layout(G, rad = 3.5):
         for c, p in color_pos.items():
             if ea in nodes_by_color[c]:
                 posx = p
-
-        #print(ea, pos[ea], pos[ea]+repos[posx], color, posx)
-        pos[ea] += repos[posx]
+        if ea in enron_nodes:
+            pass
+        else:
+            pos[ea] += repos[posx]
+            
     return pos, nodes_by_color
-
 class DictInv(dict):
     def __init__(self, *args, **kwargs):
         self.update(*args, **kwargs)
@@ -367,94 +409,8 @@ class DictInv(dict):
             raise KeyError(key)
         return val
     
-    
-    
-    
-    
-    
-convert_names = {
-    'John T Lau': 'Kenneth Lay', 
-    'John Lau': 'Kenneth Lay',
-    'Betty S Lau': 'Jeff Skilling',
-    'Betty Lau': 'Jeff Skilling',
-    'Wanda': 'Kenneth Lay',
-    'Wanda Wong': 'Kenneth Lay',
-    'WANDA WONG': 'Kenneth Lay',
-    'Cindy':'Rosalee Fleming',
-    'Peter Lyons':'Rosalee Fleming'
-}
-
-convert_orgs = {
-    'Ark Technology Solutions LLC':'mindspring',
-    'ADP. LLC':'cadvision',
-    'ADP':'cadvision',
-    'FedEx Express':'reliantenergy',
-    'FedEx Ground':'reliant',
-    'ARGUS LEGAL PLLC':'kudlow',
-    'Audi\nFinancial Services':'mediaone',
-    'Bradley Baron, LLC':'weforum',
-    'ADT SECURITY SERVICES':'mediaone',
-    'ADT Security Services':'mindspring',
-    '3	AES ADVANCED ELECTRONIC Solutions, INC':'mediaone',
-    'ADVANCED ELECTRONIC\n- SOLUTIONS, INC':'mindspring',
-    'Absolute Protective Systems Inc.':'weforum',
-    'Absolute Protective Systems, Inc.':'weforum',
-}
-
-def load_invoice(inv_path):
-    inv = pd.read_excel(inv_path).fillna('').drop(columns=['filename', 'name'])
-    inv = inv[(inv['date']!='')&(inv['amount']!='')]
-    inv.date = pd.to_datetime(inv.date.apply(lambda x: x.replace(',2',', 2')))
-    inv = inv.sort_values(by='date')
-    
-    inv['vendor_name'] = inv['vendor_name'].replace(convert_orgs, regex=True)
-    inv['recipient'] = inv['recipient'].replace(convert_names, regex=True)
-    inv['date'] = inv['date']-pd.Timedelta(days=19*365) 
-    inv['date'][:10] = inv['date'][:10]+pd.Timedelta(days=365) 
-    return inv
-
-def invoice_to_nodes(inv):
-    nodes_dict = {k:[] for k in ['name1', 'name2', 'email1', 'email2', 'org1', 'org2']}
-    edges_dict = {k:[] for k in ['sender', 'receiver1', 'receiver2', 'receiver3', 'type', 'datetime', 'desc', 'data']}
-    
-    count_node = 0
-    for i,row in inv.iterrows():
-
-        sender = row['recipient'].lower()
-        recipient = re.sub('inc|llc', '', row['vendor_name'].strip('.').lower()).strip(' ,')
-        datetime = row['date']
-        desc = row['description']
-        data = re.sub('\$|\,', '', row['amount'])
-        
-        edges_dict['sender'].append(count_node)
-        edges_dict['receiver1'].append(count_node+1)
-        edges_dict['receiver2'].append('')
-        edges_dict['receiver3'].append('')
-        edges_dict['type'].append('invoice')
-        edges_dict['datetime'].append(datetime)
-        edges_dict['desc'].append(desc)
-        edges_dict['data'].append(data)
-        
-        nodes_dict['name1'].append(sender)
-        nodes_dict['name2'].append('')
-        nodes_dict['email1'].append('')
-        nodes_dict['email2'].append('')
-        nodes_dict['org1'].append('enron')
-        nodes_dict['org2'].append('')
-        count_node+=1
-        
-        
-        nodes_dict['name1'].append(recipient)
-        nodes_dict['name2'].append('')
-        nodes_dict['email1'].append('')
-        nodes_dict['email2'].append('')
-        nodes_dict['org1'].append(recipient)
-        nodes_dict['org2'].append('')
-        count_node+=1
-        
-        
-    return pd.DataFrame(nodes_dict), pd.DataFrame(edges_dict)
-
+def filterby_date_old(df, start_date='2000-01-01', end_date='2002-01-01'):
+    return df[(df.date>=start_date)&(df.date<=end_date)].reset_index(drop=True)
 
 
     
@@ -480,46 +436,48 @@ def run():
         "kenneth lay, jeff skilling"
     )
     
-    
+    merge_cands = [{}]
     if st.sidebar.button("Find Persons of Interest"):
         merge_cands = [
             dict(sorted(node_summaries(x, state.graph.nodes).items(), key=lambda x: x[1])) 
             for x in state.graph.search_names(poi_find)
         ]
         
-        state.merge_cands = [list(x.values()) for x in merge_cands]
+        state.merge_cands = [list(x.keys()) for x in merge_cands]
         state.merge_dict.update({k:v for cand in merge_cands for k,v in cand.items()})
+        
+    st.write({str(k):str(v) for k,v in merge_cands[0].items()})
         
     ###############################################
         
     for i, x in enumerate(state.merge_cands):
         if len(x)>=2:
-            merge_keys = st.sidebar.multiselect(
-                'Merge suggestion {}'.format(i),
-                list(map(state.merge_dict.inv.get, x)), 
-                default=list(map(state.merge_dict.inv.get, x))
-            )
+            _merge_keys = [x for x in map(state.merge_dict.get, x) if x is not None]
+            merge_keys = st.sidebar.multiselect('Suggestion {}'.format(i), _merge_keys, default=_merge_keys)
 
             if st.sidebar.button("Merge {}".format(i+1)):
-                idxs = sorted(list(map(state.merge_dict.get, merge_keys)))
+                
+                idxs = sorted([k for k,v in state.merge_dict.items() if v in merge_keys])
                 state.graph.merge(*idxs)
                 state.merge_cands[i] = idxs[0:1]
                 state.merge_dict.update(node_summaries(idxs[0:1], state.graph.nodes))
                 SessionState.rerun()
     
-    _poi_add = list(map(state.merge_dict.inv.get, [x for cand in state.merge_cands for x in cand]))
+    _poi_add = list(map(state.merge_dict.get, [x for cand in state.merge_cands for x in cand]))
     poi_add = st.sidebar.multiselect('Persons List', _poi_add, default=_poi_add)
     
     if st.sidebar.button("Add Persons of Interest"):
-        poi_dict = {x:state.merge_dict[x] for x in poi_add}
+        poi_dict = {x:state.merge_dict.inv[x] for x in poi_add}
         
-        assoc_dict = node_summaries(
+        assoc_dict = {
+            v:k for k,v in node_summaries(
             state.graph.nodes_from_edges(
                 *state.graph.edges_from_nodes(
                     *list(poi_dict.values())).index
             ).drop(index=list(poi_dict.values())).index.tolist(), 
             state.graph.nodes
-        )
+        ).items()
+        }
 
         state.node_dict.update(poi_dict)
         state.node_dict.update(assoc_dict)
@@ -565,7 +523,7 @@ def run():
         "Select Date Range:",
         min_value=datetime(2001, 1, 1),
         max_value=datetime(2002, 1, 1),
-        value=(datetime(2001, 5, 1), datetime(2001, 7, 1)),
+        value=(datetime(2001, 5, 1), datetime(2001, 9, 1)),
         format="MM/DD/YY"
     )
     
@@ -573,9 +531,14 @@ def run():
     
     with st.beta_expander('Filter by Org'):
         _org = get_orgs(_assoc, state.graph.nodes)
-        org = st.multiselect('Linked organizations', sorted(_org), default=[x for x in ['enron', 'mindspring', 'mediaone', 'as-coa',
-                                                                            'harvard', 'rice', 'weforum', 'bellsouth', 
-                                                                            'gte', 'i2', 'prodigy'] if x in _org])
+        org = st.multiselect(
+            'Linked organizations', 
+            sorted(_org), 
+            default=[
+                x for x in ['mindspring', 'mediaone', 'as-coa', 'weforum', 'bellsouth', 'gte', 'i2'] 
+                if x in _org
+            ]
+        )
         
     with st.beta_expander('Filter by Assoc'):
         _assoc = filter_nodes_by_org(_assoc, state.graph.nodes, org)
@@ -611,7 +574,7 @@ def run():
 
             labels={x:G.nodes[x]['label'] for x in G.nodes}
             nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=[x for x in G.edges if G.edges[x]['type']=='email'], edge_color='blue', connectionstyle='arc3, rad = 0.1')
-            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=[x for x in G.edges if G.edges[x]['type']=='invoice'], edge_color='blue', connectionstyle='arc3, rad = 0.1')
+            nx.draw_networkx_edges(G, ax=ax, pos=pos, edgelist=[x for x in G.edges if G.edges[x]['type']=='invoice'], edge_color='red', connectionstyle='arc3, rad = 0.1')
             nx.draw_networkx_labels(G, ax=ax, pos=pos, labels=labels)
             
 
