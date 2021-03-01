@@ -446,8 +446,6 @@ def run():
         state.merge_cands = [list(x.keys()) for x in merge_cands]
         state.merge_dict.update({k:v for cand in merge_cands for k,v in cand.items()})
         
-    st.write({str(k):str(v) for k,v in merge_cands[0].items()})
-        
     ###############################################
         
     for i, x in enumerate(state.merge_cands):
