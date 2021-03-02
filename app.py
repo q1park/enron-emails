@@ -67,7 +67,8 @@ def run():
     
     poi_find = st.sidebar.text_area(
         "Add person names separated by commas", 
-        "kenneth lay"#, jeff skilling"
+        "kenneth lay, jeff skilling"
+#         "jeff skilling"
     )
 
     if st.sidebar.button("Find Persons of Interest"):
@@ -98,7 +99,8 @@ def run():
     add_keys = st.sidebar.multiselect('Persons List', _add_keys, default=_add_keys)
     
     if st.sidebar.button("Add Persons of Interest"):
-        add_idxs = sorted([k for k,v in state.merge_dict.items() if v in add_keys])
+        add_idxs = sorted([idx for cand in state.merge_cands for idx in cand])
+        
         poi_dict = state.graph.node_summaries(*add_idxs)
         assoc_dict = state.graph.assoc_summaries(*add_idxs)
 
@@ -106,6 +108,7 @@ def run():
         state.node_dict.update(assoc_dict)
         state.poi.extend(list(poi_dict.keys()))
         state.assoc.extend(list(assoc_dict.keys()))
+        
         
         state.merge_dict = DictInv()
         state.merge_cands = []
@@ -123,10 +126,6 @@ def run():
     ### Main Page
     ###############################################
     
-    
-    
-    ###############################################
-    
     st.header('Persons of Interest')
     
     _poi_keys = list(map(state.node_dict.get, state.poi))
@@ -134,7 +133,7 @@ def run():
     state.poi = [state.node_dict.inv[x] for x in poi_keys]
     
     start_date, end_date = st.slider(
-        "Select Date Range:", min_value=datetime(2001, 1, 1), max_value=datetime(2002, 1, 1),
+        "Select Date Range:", min_value=datetime(1999, 1, 1), max_value=datetime(2002, 1, 1),
         value=(datetime(2000, 1, 1), datetime(2001, 9, 1)), format="MM/DD/YY"
     )
 
@@ -184,7 +183,7 @@ def run():
     if len(sender_keys)>0 and len(receiver_keys)>0:
         pass
     
-    col1, col2 = st.beta_columns(2)
+    col1, col2, col3 = st.beta_columns(3)
     
     emails = col1.selectbox(
         "E-mails", 
@@ -192,27 +191,40 @@ def run():
     )
     col1.text("Test email")
     
-    payments = col2.selectbox(
-        "Payments", 
+    invoices = col2.selectbox(
+        "Invoices", 
         [1,2,3,4]
     )
-    col2.text("Test payment")
+    col2.text("Test invoice")
+    
+    ccs = col3.selectbox(
+        "Card Purchase", 
+        [1,2,3,4]
+    )
+    col3.text("Test purchase")
+    
+    ###############################################
     
     with st.beta_expander('Similarity Search'):
         st.subheader('Evidence Type:')
-        col3, col4, col5, col6 = st.beta_columns(4)
+        col4, col5, col6 = st.beta_columns(3)
         
-        thru_email = col3.checkbox("E-mails", True)
-        thru_invoice = col4.checkbox("Invoices", False)
-        thru_ccstate = col5.checkbox("Card Statements", False)
-        thru_xreport = col6.checkbox("Expense Reports", False)
+        thru_email = col4.checkbox("E-mails", True)
+        thru_invoice = col5.checkbox("Invoices", False)
+        thru_ccstate = col6.checkbox("Card Statements", False)
         
         st.subheader('Similarity Metrics:')
         
-        col7, col8, col9, col10 = st.beta_columns(4)
+        col7, col8, col9 = st.beta_columns(3)
         
         by_bert = col7.checkbox("by BERT", True)
         by_topic = col7.checkbox("by Topic", False)
+        
+        by_amt_inv = col8.checkbox("by Inv. Amount", True)
+        by_desc_inv = col8.checkbox("by Inv. Desc.", False)
+        
+        by_amt_cc = col9.checkbox("by CC Amount", True)
+        by_desc_cc = col9.checkbox("by CC Desc.", False)
         
         top_k = st.slider('Number of Examples', 1, 20, 10)
         
