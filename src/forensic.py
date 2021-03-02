@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 
-from src.structures import DictInv, PGraph
+from src.structures import PGraph
 from src.spellcheck import find_close
 
 
@@ -74,8 +74,8 @@ def invoices2nodes(df):
         nodes_dict['org1'].append('enron')
         nodes_dict['org2'].append('')
         
-        nodes_dict['name1'].append('')
-        nodes_dict['name2'].append(recipient)
+        nodes_dict['name1'].append('invoice')
+        nodes_dict['name2'].append('')
         nodes_dict['email1'].append('')
         nodes_dict['email2'].append('')
         nodes_dict['org1'].append(recipient)

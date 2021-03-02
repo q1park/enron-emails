@@ -112,11 +112,18 @@ def run():
         SessionState.rerun()
 
     ###############################################
+    
+    st.sidebar.header('Search')
+    by_name = st.sidebar.checkbox("by Name", True)
+    by_org = st.sidebar.checkbox("by Org", False)
+    by_text = st.sidebar.checkbox("by Text", False)
+    st.sidebar.write('Removed: To be superseded by "SinguSearch"')
+    
+    ###############################################
     ### Main Page
     ###############################################
     
-    with st.beta_expander('Search'):
-        st.write('Removed: To be superseded by "SinguSearch"')
+    
     
     ###############################################
     
@@ -128,12 +135,12 @@ def run():
     
     start_date, end_date = st.slider(
         "Select Date Range:", min_value=datetime(2001, 1, 1), max_value=datetime(2002, 1, 1),
-        value=(datetime(2001, 5, 1), datetime(2001, 9, 1)), format="MM/DD/YY"
+        value=(datetime(2000, 1, 1), datetime(2001, 9, 1)), format="MM/DD/YY"
     )
 
     _assoc = filter_nodes_by_date(state.assoc, state.graph.edges, start_date=start_date, end_date=end_date)
     
-    with st.beta_expander('Filter by Org', expanded=True):
+    with st.beta_expander('Filter by Org'):
         _org = get_orgs(_assoc, state.graph.nodes)
         org = st.multiselect('Linked organizations', sorted(_org), default=[x for x in DEFAULT_ORGS if x in _org])
         
@@ -148,14 +155,70 @@ def run():
     
     st.write('Found {} records'.format(len(state.subgraph.edges)))
     
-    with st.beta_expander('Show Graph', expanded=True):
+    ###############################################
+    
+    st.header('Inspect Evidence')
+
+    with st.beta_expander('Show Graph'):
         if len(state.poi)==0:
             st.write('Before drawing a graph you must add a person of interest using the sidebar')
         else:
             G = graph_to_networkx(state.subgraph)
             st.write(draw_graph(G))
-            
-#     st.header('Inspect Evidence')
+
+    _senders = list(sorted(set([x for x in state.subgraph.edges['sender'].tolist() if x!=''])))
+    _sender_keys = list(map(state.node_dict.get, _senders))
+    sender_keys = st.multiselect('Sender:', _sender_keys, default=_sender_keys)
+
+    if len(sender_keys)>0:
+        sender_idxs = sorted([k for k,v in state.node_dict.items() if v in sender_keys])
+        _edges = state.subgraph.edges[state.subgraph.edges['sender'].isin(sender_idxs)]
+        
+        _receivers = list(sorted(set([x for x in _edges['receiver1'].tolist() if x!=''])))
+    else:
+        _receivers = []
+        
+    _receiver_keys = list(map(state.node_dict.get, _receivers))
+    receiver_keys = st.multiselect('Receiver:', _receiver_keys, default=_receiver_keys)
+    
+    if len(sender_keys)>0 and len(receiver_keys)>0:
+        pass
+    
+    col1, col2 = st.beta_columns(2)
+    
+    emails = col1.selectbox(
+        "E-mails", 
+        [1,2,3,4]
+    )
+    col1.text("Test email")
+    
+    payments = col2.selectbox(
+        "Payments", 
+        [1,2,3,4]
+    )
+    col2.text("Test payment")
+    
+    with st.beta_expander('Similarity Search'):
+        st.subheader('Evidence Type:')
+        col3, col4, col5, col6 = st.beta_columns(4)
+        
+        thru_email = col3.checkbox("E-mails", True)
+        thru_invoice = col4.checkbox("Invoices", False)
+        thru_ccstate = col5.checkbox("Card Statements", False)
+        thru_xreport = col6.checkbox("Expense Reports", False)
+        
+        st.subheader('Similarity Metrics:')
+        
+        col7, col8, col9, col10 = st.beta_columns(4)
+        
+        by_bert = col7.checkbox("by BERT", True)
+        by_topic = col7.checkbox("by Topic", False)
+        
+        top_k = st.slider('Number of Examples', 1, 20, 10)
+        
+
+        if st.button("Find Similar"):
+            st.write('Not yet implemented')
 
 #     sender = st.selectbox(
 #         "Sender:", 
@@ -182,14 +245,7 @@ def run():
 #         col2.text("Text:")
 #         col2.write(state.text_view[email])
 
-#     with st.beta_expander('Find Similar Examples'):
 
-#         top_k = st.slider('Number of Examples', 1, 20, 10)
-#         by_bert = st.checkbox("by BERT", True)
-#         by_topic = st.checkbox("by Topic", False)
-
-#         if st.button("Find Similar"):
-#             st.write('Not yet implemented')
 
             
     
