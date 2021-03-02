@@ -32,8 +32,8 @@ def edge_summaries(idxs, nodes, edges):
         sender_row = nodes.loc[int(row['sender'])]
         receiver_row = nodes.loc[int(row['receiver1'])]
         sender = sender_row['name1'] if sender_row['name1'] is not '' else sender_row['email1'].split('@')[0]
-        receiver = receiver_row['name1'] if receiver_row['name1'] is not '' else receiver_row['email1'].split('@')[0]
-        return sender, receiver, row['datetime'].date(), row['desc'][:10]
+        receiver = receiver_row['name1'] if receiver_row['name1'] is not 'invoice' else receiver_row['org1']
+        return row['datetime'].strftime("%y/%m/%d"), sender, receiver, row['desc'][:10]
     return {idx:summarize(edges.loc[idx]) for idx in idxs}
 
 def get_orgs(idxs, nodes):
@@ -55,8 +55,10 @@ def filter_nodes_by_date(idxs, edges, start_date, end_date):
 def run():
     state = SessionState.get(
         graph=ForensicGraph.from_emails('data/enron/emails_filtered.csv'), subgraph=PGraph(), 
-        node_dict=DictInv(), edge_dict=DictInv(), merge_dict=DictInv(),
-        poi=[], assoc=[], org=[], merge_cands=[]
+        node_dict=DictInv(), edge_dict=DictInv(), 
+        merge_dict=DictInv(), merge_cands=[],
+        poi=[], assoc=[], org=[],
+        show_dict=DictInv()
     )
     
     ###############################################
@@ -181,27 +183,41 @@ def run():
     receiver_keys = st.multiselect('Receiver:', _receiver_keys, default=_receiver_keys)
     
     if len(sender_keys)>0 and len(receiver_keys)>0:
-        pass
-    
+        sender_idxs = sorted([k for k,v in state.node_dict.items() if v in sender_keys])
+        receiver_idxs = sorted([k for k,v in state.node_dict.items() if v in receiver_keys])
+        df_show = state.subgraph.edges[state.subgraph.edges['sender'].isin(sender_idxs)]
+        df_show = df_show[df_show['receiver1'].isin(receiver_idxs)]
+        state.show_dict.update(edge_summaries(df_show.index.tolist(), state.subgraph.nodes, df_show))
+    else:
+        df_show = pd.DataFrame(columns=state.subgraph.edges.columns)
+        state.show_dict = DictInv()
+        
+    df_show.datetime = df_show.datetime.apply(lambda x: x.strftime("%y/%m/%d"))
+    df_emails = df_show[df_show['type']=='email']
+    df_invoices = df_show[df_show['type']=='invoice']
+    df_ccs = df_show[df_show['type']=='cc']
+        
     col1, col2, col3 = st.beta_columns(3)
     
-    emails = col1.selectbox(
+    email = col1.selectbox(
         "E-mails", 
-        [1,2,3,4]
+        [state.show_dict[x] for x in df_emails.index.tolist()]
     )
-    col1.text("Test email")
     
-    invoices = col2.selectbox(
+    if email is not None:
+        col1.write(df_show[['datetime', 'desc', 'data']].loc[state.show_dict.inv[email]].to_dict())
+    
+    invoice = col2.selectbox(
         "Invoices", 
-        [1,2,3,4]
+        [state.show_dict[x] for x in df_invoices.index.tolist()]
     )
-    col2.text("Test invoice")
+    if invoice is not None:
+        col2.write(df_show[['datetime', 'desc', 'data']].loc[state.show_dict.inv[invoice]].to_dict())
     
-    ccs = col3.selectbox(
-        "Card Purchase", 
-        [1,2,3,4]
-    )
-    col3.text("Test purchase")
+    cc = col3.selectbox("Card Purchase", [])
+    
+    if cc is not None:
+        col3.text("Example credit card statement entry")
     
     ###############################################
     
