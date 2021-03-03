@@ -49,10 +49,19 @@ def filter_nodes_by_date(idxs, edges, start_date, end_date):
     return [x for x in idxs if x in all_nodes]
 
 
+from src.utils import load_pickle, load_numpy
 
+def get_similarity_dict(edge_idx, idx_dict_inv, emb_arr):
+    emb_query = emb_arr[idx_dict_inv[edge_idx]]
+    similarities = emb_arr@emb_query.T/(np.linalg.norm(emb_arr, axis=-1)*np.linalg.norm(emb_query))
+    return dict(zip(idx_dict_inv.values(), similarities))
 
     
 def run():
+    idx_dict = load_pickle('test3.pkl')
+    idx_dict_inv = {v:k for k,v in idx_dict.items()}
+    embs = load_numpy('test3.npy')
+    
     state = SessionState.get(
         graph=ForensicGraph.from_emails('data/enron/emails_filtered.csv'), subgraph=PGraph(), 
         node_dict=DictInv(), edge_dict=DictInv(), 
@@ -69,9 +78,10 @@ def run():
     
     poi_find = st.sidebar.text_area(
         "Add person names separated by commas", 
-        "kenneth lay, jeff skilling"
-#         "jeff skilling"
+        "kenneth lay"
     )
+    
+    st.sidebar.write('Hint: Also try searching for "jeff skilling"')
 
     if st.sidebar.button("Find Persons of Interest"):
         merge_cands = [
@@ -136,7 +146,7 @@ def run():
     
     start_date, end_date = st.slider(
         "Select Date Range:", min_value=datetime(1999, 1, 1), max_value=datetime(2002, 1, 1),
-        value=(datetime(2000, 1, 1), datetime(2001, 9, 1)), format="MM/DD/YY"
+        value=(datetime(2000, 12, 11), datetime(2001, 10, 1)), format="MM/DD/YY"
     )
 
     _assoc = filter_nodes_by_date(state.assoc, state.graph.edges, start_date=start_date, end_date=end_date)
@@ -205,6 +215,7 @@ def run():
     )
     
     if email is not None:
+        col1.write('E-mail edge-id: {}'.format(state.show_dict.inv[email]))
         col1.write(df_show[['datetime', 'desc', 'data']].loc[state.show_dict.inv[email]].to_dict())
     
     invoice = col2.selectbox(
@@ -212,6 +223,7 @@ def run():
         [state.show_dict[x] for x in df_invoices.index.tolist()]
     )
     if invoice is not None:
+        col2.write('invoice edge-id: {}'.format(state.show_dict.inv[invoice]))
         col2.write(df_show[['datetime', 'desc', 'data']].loc[state.show_dict.inv[invoice]].to_dict())
     
     cc = col3.selectbox("Card Purchase", [])
@@ -233,20 +245,37 @@ def run():
         
         col7, col8, col9 = st.beta_columns(3)
         
-        by_bert = col7.checkbox("by BERT", True)
-        by_topic = col7.checkbox("by Topic", False)
+        if thru_email:        
+            by_bert = col7.checkbox("by BERT", True)
+            by_topic = col7.checkbox("by Topic", False)
+        if thru_invoice:   
+            by_amt_inv = col8.checkbox("by Inv. Amount", True)
+            by_desc_inv = col8.checkbox("by Inv. Desc.", False)
+        if thru_ccstate:   
+            by_amt_cc = col9.checkbox("by CC Amount", True)
+            by_desc_cc = col9.checkbox("by CC Desc.", False)
         
-        by_amt_inv = col8.checkbox("by Inv. Amount", True)
-        by_desc_inv = col8.checkbox("by Inv. Desc.", False)
+        top_k = st.slider('Number of Examples', 1, 20, 5)
         
-        by_amt_cc = col9.checkbox("by CC Amount", True)
-        by_desc_cc = col9.checkbox("by CC Desc.", False)
-        
-        top_k = st.slider('Number of Examples', 1, 20, 10)
         
 
         if st.button("Find Similar"):
-            st.write('Not yet implemented')
+            col10, col11, col12 = st.beta_columns(3)
+            if thru_email and email is not None:
+                query_idx = state.show_dict.inv[email]
+                scores = dict(
+                    sorted(
+                        get_similarity_dict(query_idx, idx_dict_inv, embs).items(), key=lambda x: x[1], reverse=True
+                    )[1:top_k]
+                )
+                show_list = state.graph.edges[['sender', 'receiver1', 'datetime', 'desc', 'data']].loc[list(scores.keys())]
+                show_list.sender = show_list.sender.apply(lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else '')
+                show_list.receiver1 = show_list.receiver1.apply(lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else '')
+                show_list.datetime = show_list.datetime.apply(lambda x: x.strftime("%y/%m/%d"))
+                show_dict = show_list.T.to_dict()
+                col10.write({'{}'.format(scores[k]):show_dict[k] for k in list(scores.keys())})
+                
+                
 
 #     sender = st.selectbox(
 #         "Sender:", 

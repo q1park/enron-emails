@@ -1,3 +1,7 @@
+./test.pkl
+./test.npy
+./test2.npy
+
 data/enron/emails.csv
 data/enron/emails_clean.csv
 data/enron/_emails*
