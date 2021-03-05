@@ -250,7 +250,7 @@ def run():
         
         thru_email = col4.checkbox("E-mails", True)
         thru_invoice = col5.checkbox("Invoices", True)
-        thru_ccstate = col6.checkbox("Card Statements", False)
+#         thru_ccstate = col6.checkbox("Card Statements", False)
         
         st.subheader('Similarity Metrics:')
         
@@ -258,14 +258,14 @@ def run():
         
         if thru_email:        
             by_bert = col7.checkbox("by BERT", True)
-            by_topic = col7.checkbox("by Topic", False)
+#             by_topic = col7.checkbox("by Topic", False)
         if thru_invoice:   
-            by_desc_inv = col8.checkbox("by Inv. Desc.", False)
+            by_desc_inv = col8.checkbox("by Inv. Desc.", True)
             by_amt_inv = col8.checkbox("by Inv. Amount", True)
             
-        if thru_ccstate:   
-            by_desc_cc = col9.checkbox("by CC Desc.", True)
-            by_amt_cc = col9.checkbox("by CC Amount", False)
+#         if thru_ccstate:   
+#             by_desc_cc = col9.checkbox("by CC Desc.", True)
+#             by_amt_cc = col9.checkbox("by CC Amount", False)
             
         
         top_k = st.slider('Number of Examples', 1, 20, 5)
