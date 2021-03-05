@@ -1,6 +1,7 @@
 ./test.pkl
 ./test.npy
-./test2.npy
+test.pkl
+test.npy
 
 data/enron/emails.csv
 data/enron/emails_clean.csv

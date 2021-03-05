@@ -54,13 +54,24 @@ from src.utils import load_pickle, load_numpy
 def get_similarity_dict(edge_idx, idx_dict_inv, emb_arr):
     emb_query = emb_arr[idx_dict_inv[edge_idx]]
     similarities = emb_arr@emb_query.T/(np.linalg.norm(emb_arr, axis=-1)*np.linalg.norm(emb_query))
-    return dict(zip(idx_dict_inv.values(), similarities))
+    return dict(zip(idx_dict_inv.keys(), similarities))
+
+def get_similarity_dict2(edge_idx, idx_dict_inv, emb_arr):
+    emb_query = emb_arr[idx_dict_inv[edge_idx]]
+    print(emb_query)
+    similarities = 1-0.5*np.abs(emb_query-emb_arr)
+    return dict(zip(idx_dict_inv.keys(), similarities.squeeze()))
 
     
 def run():
     idx_dict = load_pickle('test3.pkl')
     idx_dict_inv = {v:k for k,v in idx_dict.items()}
     embs = load_numpy('test3.npy')
+    
+    idx_dict2 = load_pickle('testinv.pkl')
+    idx_dict_inv2 = {v:k for k,v in idx_dict2.items()}
+    embs2 = load_numpy('testinv.npy')
+    embs2a = load_numpy('testinvamt.npy')
     
     state = SessionState.get(
         graph=ForensicGraph.from_emails('data/enron/emails_filtered.csv'), subgraph=PGraph(), 
@@ -233,12 +244,12 @@ def run():
     
     ###############################################
     
-    with st.beta_expander('Similarity Search'):
+    with st.beta_expander('Similarity Search', expanded=True):
         st.subheader('Evidence Type:')
         col4, col5, col6 = st.beta_columns(3)
         
         thru_email = col4.checkbox("E-mails", True)
-        thru_invoice = col5.checkbox("Invoices", False)
+        thru_invoice = col5.checkbox("Invoices", True)
         thru_ccstate = col6.checkbox("Card Statements", False)
         
         st.subheader('Similarity Metrics:')
@@ -249,14 +260,15 @@ def run():
             by_bert = col7.checkbox("by BERT", True)
             by_topic = col7.checkbox("by Topic", False)
         if thru_invoice:   
-            by_amt_inv = col8.checkbox("by Inv. Amount", True)
             by_desc_inv = col8.checkbox("by Inv. Desc.", False)
+            by_amt_inv = col8.checkbox("by Inv. Amount", True)
+            
         if thru_ccstate:   
-            by_amt_cc = col9.checkbox("by CC Amount", True)
-            by_desc_cc = col9.checkbox("by CC Desc.", False)
+            by_desc_cc = col9.checkbox("by CC Desc.", True)
+            by_amt_cc = col9.checkbox("by CC Amount", False)
+            
         
         top_k = st.slider('Number of Examples', 1, 20, 5)
-        
         
 
         if st.button("Find Similar"):
@@ -269,13 +281,56 @@ def run():
                     )[1:top_k]
                 )
                 show_list = state.graph.edges[['sender', 'receiver1', 'datetime', 'desc', 'data']].loc[list(scores.keys())]
-                show_list.sender = show_list.sender.apply(lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else '')
-                show_list.receiver1 = show_list.receiver1.apply(lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else '')
+                show_list.sender = show_list.sender.apply(
+                    lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else ''
+                )
+                show_list.receiver1 = show_list.receiver1.apply(
+                    lambda x: state.graph.nodes.loc[int(x)].email1 if x!='' else ''
+                )
                 show_list.datetime = show_list.datetime.apply(lambda x: x.strftime("%y/%m/%d"))
                 show_dict = show_list.T.to_dict()
                 col10.write({'{}'.format(scores[k]):show_dict[k] for k in list(scores.keys())})
                 
-                
+            if thru_invoice and invoice is not None:
+                query_idx2 = state.show_dict.inv[invoice]
+
+                if by_desc_inv and not by_amt_inv:
+                    scores2 = dict(
+                        sorted(
+                            get_similarity_dict(query_idx2, idx_dict_inv2, embs2).items(), key=lambda x: x[1], reverse=True
+                        )[1:top_k]
+                    )
+                    
+                elif not by_desc_inv and by_amt_inv:
+                    scores2 = dict(
+                        sorted(
+                            get_similarity_dict2(query_idx2, idx_dict_inv2, embs2a).items(), key=lambda x: x[1], reverse=True
+                        )[1:top_k]
+                    )
+                    
+                elif by_desc_inv and by_amt_inv:
+                    _scores2 = get_similarity_dict(query_idx2, idx_dict_inv2, embs2)
+                    _scores2a = get_similarity_dict2(query_idx2, idx_dict_inv2, embs2a)
+                    scores2 = dict(
+                        sorted(
+                            {k:np.mean([v, _scores2a[k]]) for k,v in _scores2.items() if k in _scores2a}.items(), 
+                            key=lambda x: x[1], reverse=True
+                        )[1:top_k]
+                    )
+                    
+                else:
+                    scores2 = {}
+
+                show_list2 = state.graph.edges[['sender', 'receiver1', 'datetime', 'desc', 'data']].loc[list(scores2.keys())]
+                show_list2.sender = show_list2.sender.apply(
+                    lambda x: state.graph.nodes.loc[int(x)].name1 if x!='' else ''
+                )
+                show_list2.receiver1 = show_list2.receiver1.apply(
+                    lambda x: state.graph.nodes.loc[int(x)].org1 if x!='' else ''
+                )
+                show_list2.datetime = show_list2.datetime.apply(lambda x: x.strftime("%y/%m/%d"))
+                show_dict2 = show_list2.T.to_dict()
+                col11.write({'{}'.format(scores2[k]):show_dict2[k] for k in list(scores2.keys())})
 
 #     sender = st.selectbox(
 #         "Sender:", 
